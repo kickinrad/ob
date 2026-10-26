@@ -1,11 +1,12 @@
 # ob
 
-`ob` is a single-process Bun server, packaged as a single Docker image, that
+`ob` is a Bun server, packaged as a single Docker image, that
 keeps one or more Obsidian vaults bidirectionally synced via the official
 `obsidian-headless` CLI, embeds and indexes their Markdown into an in-process
 LanceDB store, and exposes both a REST API and a Streamable HTTP/SSE MCP
 server so an LLM agent can CRUD documents and search them by natural
-language. One container, one process, one image — no orchestration required.
+language. One long-lived server process supervises the sync CLI and short-lived
+local embedding workers; no separate process supervisor is required.
 
 Landing page: <https://ob.fx.gd>
 
@@ -133,8 +134,8 @@ that want readiness-gated traffic should configure their own probe against
 > attempts in a row without recovering — about 15 minutes of continuous
 > wedge at the defaults (three 5-minute stall kills). By then in-process
 > retries have demonstrably not brought sync back, so restarting the pod is
-> the backstop. The container is a single process hosting the HTTP API *and*
-> every vault child, so that restart takes the API and every healthy vault
+> the backstop. The long-lived server owns the HTTP API *and* every vault
+> child, so that restart takes the API and every healthy vault
 > with it; until it happens the API keeps serving reads and writes for every
 > vault, sync down or not. Set `OB_HEALTHZ_SYNC_FAILURE_THRESHOLD=0` for the
 > old always-200 behaviour. `/readyz` is the readiness probe and the alerting
@@ -239,7 +240,7 @@ not exist yet is fine — it lists as empty and is created on first write.
 The system is fully spec-driven. Every behavior the running container exposes
 is described in one of these documents:
 
-- [Architecture](docs/specs/architecture/index.md) — single-process topology,
+- [Architecture](docs/specs/architecture/index.md) — server and child-process topology,
   runtime, configuration, container shape, and standing testing/lint
   conventions every other spec inherits.
 - [Obsidian Sync](docs/specs/obsidian-sync/index.md) — auth-token bootstrap

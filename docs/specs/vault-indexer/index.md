@@ -9,7 +9,7 @@ In v1 the indexer covers Markdown only (`.md` / `.markdown`). Binary files (imag
 ## Background
 
 - LanceDB is an embedded vector store usable directly from TypeScript via `@lancedb/lancedb`. There is no separate database process.
-- For v1 the default embedder MUST be `Xenova/all-MiniLM-L6-v2` via `@huggingface/transformers` (Transformers.js), 384-dim, fully in-process. OpenAI-compatible HTTP embedders MUST be selectable via env (`EMBEDDING_PROVIDER=openai`).
+- For v1 the default embedder MUST be `Xenova/all-MiniLM-L6-v2` via `@huggingface/transformers` (Transformers.js), 384-dim, in a short-lived local Bun worker. OpenAI-compatible HTTP embedders MUST be selectable via env (`EMBEDDING_PROVIDER=openai`).
 - Related specs: [Architecture](../architecture/), [Obsidian Sync](../obsidian-sync/), [REST API](../rest-api/).
 
 ## Requirements
@@ -213,7 +213,9 @@ src/indexer/
   pipeline.ts    # path → chunks → vectors → upsert
 src/embeddings/
   index.ts        # provider selection from env
-  transformers.ts # local Xenova model
+  isolated.ts     # bounded batches and worker lifecycle
+  transformers-worker.ts # local model worker entry point
+  transformers.ts # local Xenova model and tensor disposal
   openai.ts       # OpenAI-compatible HTTP
 ```
 
@@ -235,6 +237,7 @@ fs unlink ───────────────────────�
 ## Constraints
 
 - The default embedder MUST run with no external network call after the initial model download.
+- The local embedder MUST cap each inference batch at 16 texts and recycle its worker after at most 8 batches so large notes and repeated edits cannot retain unbounded ONNX allocations.
 - Per-call embedder latency MUST NOT block HTTP request handling — search is allowed to take whatever time the embedder needs (one call to embed the query), but indexing MUST happen on background tasks.
 - Memory: a single in-flight scan MUST NOT load the entire vault into memory. Files MUST be processed one at a time (with concurrency `n=4`).
 

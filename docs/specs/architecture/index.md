@@ -2,7 +2,7 @@
 
 ## Overview
 
-`ob` is a single-process Bun server packaged as a single Docker image. Inside that one process it (a) supervises the official `obsidian-headless` CLI to keep one or more Obsidian vaults bidirectionally synced to local disk, (b) embeds and indexes the on-disk vault into an in-process LanceDB store, and (c) exposes both a REST API and a Streamable HTTP/SSE MCP server so an LLM agent can CRUD documents and search them by natural language.
+`ob` is a Bun server packaged as a single Docker image. Its long-lived process (a) supervises the official `obsidian-headless` CLI to keep one or more Obsidian vaults bidirectionally synced to local disk, (b) indexes the on-disk vault into an in-process LanceDB store while short-lived local workers compute embeddings, and (c) exposes both a REST API and a Streamable HTTP/SSE MCP server so an LLM agent can CRUD documents and search them by natural language.
 
 This spec covers project-level concerns only: runtime, layout, build, container topology, configuration surface, and the standing testing/lint conventions every other spec inherits. Feature behavior lives in the feature specs listed below.
 
@@ -17,10 +17,11 @@ This spec covers project-level concerns only: runtime, layout, build, container 
 
 ## Requirements
 
-### Single-Process Topology
+### Server-Process Topology
 
 - The container MUST run exactly one long-lived Bun process as PID 1.
 - That process MUST be the only owner of the HTTP listener, the LanceDB connections, the chokidar watchers, and every spawned `ob` child process.
+- The default local embedder MAY use short-lived Bun child processes for bounded ONNX memory. The server MUST own and reap them on shutdown.
 - The container MUST NOT use a process supervisor (`s6`, `supervisord`, `runit`). Child-process supervision MUST be implemented in TypeScript inside the Bun process.
 - `tini` MAY be used as PID 1 only as a thin signal/zombie reaper that `exec`s the Bun process; it MUST NOT be configured to launch any other service.
 
@@ -28,8 +29,8 @@ This spec covers project-level concerns only: runtime, layout, build, container 
 
 - **GIVEN** a container started with `OBSIDIAN_AUTH_TOKEN` and `VAULTS_JSON` set
 - **WHEN** the container starts
-- **THEN** exactly one Bun process is visible to the host
-- **AND** any `ob` child processes appear as descendants of that Bun process
+- **THEN** exactly one long-lived Bun process is visible to the host
+- **AND** any sync or embedding child processes appear as descendants of that Bun process
 
 #### Scenario: SIGTERM
 
@@ -37,6 +38,7 @@ This spec covers project-level concerns only: runtime, layout, build, container 
 - **WHEN** the orchestrator sends SIGTERM to PID 1
 - **THEN** the Bun process stops accepting new HTTP requests within 1s
 - **AND** sends SIGTERM to every spawned `ob` child
+- **AND** stops every embedding child
 - **AND** flushes/closes all LanceDB tables
 - **AND** exits with code 0 within 10s
 
@@ -174,9 +176,9 @@ REST and MCP MUST be two interfaces to the same functionality, not two implement
   - `GET /healthz` — liveness, returns 200 once the process is up and fails only on persistent sync failure.
   - `GET /readyz` — readiness **and** the aggregate process-health surface. Returns 503 whenever any critical component is not healthy, and its body reports the state of every critical long-lived component. The exact 200/503 conditions and the body shape are owned by [REST API › Health endpoints](../rest-api/index.md#health-endpoints).
   - `GET /metrics` — text/plain Prometheus exposition (basic counters: indexed docs, search queries, sync errors).
-- `/healthz` MUST reflect sync health only through the persistent-failure rule owned by [REST API › Health endpoints](../rest-api/index.md#health-endpoints) — a vault in `failed`, or one whose `consecutiveFailures` has reached `OB_HEALTHZ_SYNC_FAILURE_THRESHOLD` — and MUST NOT depend on indexer state or any other subsystem, nor read any state that can block. The container is a single process hosting the API and every vault child, so a liveness failure restarts all of them. In-process supervision (restarting the individual `ob` child, forever by default) remains the first line and handles transients; liveness is the backstop once those retries have demonstrably not brought sync back. [Change 0017](../../changes/0017-sync-liveness.md) records why this reverses [0015](../../changes/0015-sync-stall-watchdog.md)'s "no sync health on `/healthz`": once a ceiling made `failed` terminal, a dead sync was invisible to everything outside the process and stayed dead until someone restarted the pod by hand.
+- `/healthz` MUST reflect sync health only through the persistent-failure rule owned by [REST API › Health endpoints](../rest-api/index.md#health-endpoints) — a vault in `failed`, or one whose `consecutiveFailures` has reached `OB_HEALTHZ_SYNC_FAILURE_THRESHOLD` — and MUST NOT depend on indexer state or any other subsystem, nor read any state that can block. The long-lived server owns the API and every vault child, so a liveness failure restarts all of them. Server supervision (restarting the individual `ob` child, forever by default) remains the first line and handles transients; liveness is the backstop once those retries have demonstrably not brought sync back. [Change 0017](../../changes/0017-sync-liveness.md) records why this reverses [0015](../../changes/0015-sync-stall-watchdog.md)'s "no sync health on `/healthz`": once a ceiling made `failed` terminal, a dead sync was invisible to everything outside the process and stayed dead until someone restarted the pod by hand.
 - Sync health MUST NOT gate request handling: while `/healthz` reports a vault's sync down, the API keeps serving reads and writes for it.
-- `/readyz` MUST be the single aggregate status surface: every critical long-lived in-process component MUST be represented in its body. Today that is the per-vault `ob sync` children and the per-vault indexers. Introducing another long-lived component MUST extend the body rather than add a fourth health route — a status surface that does not enumerate everything long-lived is worse than none, because it reads as an all-clear.
+- `/readyz` MUST be the single aggregate status surface: every critical long-lived component supervised by the server MUST be represented in its body. Today that is the per-vault `ob sync` children and the per-vault indexers. Introducing another long-lived component MUST extend the body rather than add a fourth health route — a status surface that does not enumerate everything long-lived is worse than none, because it reads as an all-clear.
 
 #### Scenario: A transient wedge does not restart the pod
 

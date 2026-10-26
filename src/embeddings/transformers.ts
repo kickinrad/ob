@@ -2,7 +2,7 @@
  * Transformers.js (`@huggingface/transformers`) embedder.
  *
  * Default provider per spec: 384-dim `Xenova/all-MiniLM-L6-v2` running on CPU
- * inside the Bun process. The model file (~90 MB) is cached under
+ * in a recyclable Bun child process. The model file (~90 MB) is cached under
  * `<DATA_DIR>/models/` via the upstream `cache_dir` option AND the
  * `TRANSFORMERS_CACHE` / `HF_HOME` env vars (we set both, since which one wins
  * depends on the upstream env-detect order, which has changed across versions).
