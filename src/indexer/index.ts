@@ -153,6 +153,15 @@ export async function startIndexer(cfg: Config, deps: IndexerDeps): Promise<Inde
   // proving the embedder works first, we only commit to the destructive
   // rebuild once the rest of startup is plausibly going to succeed.
   const embedder = deps.embedder ?? buildEmbedder(cfg);
+  const cleanupEmbedder = async (): Promise<void> => {
+    try {
+      await embedder.stop?.();
+    } catch (cause) {
+      log.warn("indexer: embedder cleanup failed", {
+        error: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+  };
   let dim: number;
   try {
     dim = await warmEmbedder(embedder);
@@ -163,7 +172,7 @@ export async function startIndexer(cfg: Config, deps: IndexerDeps): Promise<Inde
       logger: log,
     });
   } catch (error) {
-    await embedder.stop?.();
+    await cleanupEmbedder();
     throw error;
   }
   // Reconcile the pipeline-version sidecar BEFORE opening any per-vault
@@ -203,7 +212,7 @@ export async function startIndexer(cfg: Config, deps: IndexerDeps): Promise<Inde
         }
       }),
     );
-    await embedder.stop?.();
+    await cleanupEmbedder();
   };
 
   try {

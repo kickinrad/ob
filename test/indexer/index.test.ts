@@ -302,6 +302,25 @@ describe("startIndexer round-trip", () => {
     expect(warmupCalls).toBeGreaterThanOrEqual(1);
   });
 
+  test("warmup failure remains primary if embedder cleanup also fails", async () => {
+    const primary = new Error("warmup failed");
+    const embedder: Embedder = {
+      dim: 0,
+      embed: async () => {
+        throw primary;
+      },
+      stop: async () => {
+        throw new Error("cleanup failed");
+      },
+    };
+    await expect(
+      startIndexer(makeConfig({ dataDir: tmpDataDir("warmup-cleanup") }), {
+        logger: silent(),
+        embedder,
+      }),
+    ).rejects.toBe(primary);
+  });
+
   test("warmup is skipped when embedder.dim is already known", async () => {
     const dataDir = tmpDataDir("warm");
     const cfg = makeConfig({ dataDir });

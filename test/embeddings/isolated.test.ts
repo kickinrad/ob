@@ -67,4 +67,47 @@ describe("isolated Transformers embedder", () => {
     await expect(pending).rejects.toThrow("stopped");
     await expect(embedder.embed(["after"])).rejects.toThrow("stopped");
   });
+
+  test("stop during recycle cannot spawn a replacement child", async () => {
+    const embedder = buildIsolatedTransformersEmbedder(
+      { model: "unused", dataDir: "/tmp/unused" },
+      { childPath: fixture, batchesPerChild: 1 },
+    );
+    try {
+      await embedder.embed(["first"]);
+      const rollover = embedder.embed(["second"]);
+      await Bun.sleep(10);
+      const stopped = embedder.stop();
+      await expect(rollover).rejects.toThrow("stopped");
+      await stopped;
+    } finally {
+      await embedder.stop();
+    }
+  });
+
+  test("failed batches also count toward the recycle limit", async () => {
+    const embedder = buildIsolatedTransformersEmbedder(
+      { model: "unused", dataDir: "/tmp/unused" },
+      { childPath: fixture, batchesPerChild: 2 },
+    );
+    async function failedPid(): Promise<string> {
+      try {
+        await embedder.embed(["error"]);
+        throw new Error("expected child failure");
+      } catch (error) {
+        const match = String(error).match(/model broke in (\d+)/);
+        if (match?.[1] === undefined) throw error;
+        return match[1];
+      }
+    }
+    try {
+      const first = await failedPid();
+      const second = await failedPid();
+      const third = await failedPid();
+      expect(first).toBe(second);
+      expect(third).not.toBe(first);
+    } finally {
+      await embedder.stop();
+    }
+  });
 });

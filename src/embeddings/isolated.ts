@@ -74,6 +74,7 @@ export function buildIsolatedTransformersEmbedder(
   async function oneBatch(texts: string[]): Promise<Float32Array[]> {
     if (stopped) throw new EmbedderError("embedding child has stopped");
     if (child !== null && batches >= batchesPerChild) await recycle();
+    if (stopped) throw new EmbedderError("embedding child stopped");
     if (child === null) spawnChild();
     const proc = child;
     if (proc === null) throw new EmbedderError("embedding child failed to start");
@@ -87,13 +88,13 @@ export function buildIsolatedTransformersEmbedder(
     } finally {
       pending = null;
     }
+    batches++;
     if (reply.id !== id) throw new EmbedderError("embedding child returned an out-of-order reply");
     if (reply.error !== undefined) throw new EmbedderError(reply.error);
     if (reply.vectors === undefined || reply.dim === undefined) {
       throw new EmbedderError("embedding child returned an incomplete reply");
     }
     dim = reply.dim;
-    batches++;
     return reply.vectors;
   }
 
