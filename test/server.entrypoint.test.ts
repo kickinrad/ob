@@ -7,7 +7,7 @@
  */
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -15,10 +15,16 @@ const SERVER_ENTRY = resolve(import.meta.dir, "..", "src", "server.ts");
 
 function tmpHomeEnv(): Record<string, string> {
   const dir = mkdtempSync(join(tmpdir(), "ob-entry-"));
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  const ob = join(bin, "ob");
+  writeFileSync(ob, '#!/bin/sh\nif [ "$1" = "sync" ]; then exec sleep 30; fi\nexit 0\n');
+  chmodSync(ob, 0o700);
   return {
     XDG_CONFIG_HOME: dir,
     HOME: dir,
     DATA_DIR: join(dir, "data"),
+    PATH: `${bin}:${process.env.PATH ?? ""}`,
   };
 }
 

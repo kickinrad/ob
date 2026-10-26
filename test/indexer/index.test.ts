@@ -222,6 +222,24 @@ describe("startIndexer round-trip", () => {
     await a;
   }, 20_000);
 
+  test("stop reaps an embedder-owned child exactly once", async () => {
+    const dataDir = tmpDataDir("embedder-stop");
+    const cfg = makeConfig({ dataDir });
+    mkdirSync(join(dataDir, "vaults", "v"), { recursive: true });
+    let stops = 0;
+    const embedder: Embedder = {
+      dim: 4,
+      embed: async (texts) => texts.map(() => new Float32Array(4)),
+      stop: async () => {
+        stops++;
+      },
+    };
+    const indexer = await startIndexer(cfg, { logger: silent(), embedder });
+    await indexer.stop();
+    await indexer.stop();
+    expect(stops).toBe(1);
+  });
+
   test("scenario: dimension mismatch on open names both dims", async () => {
     const dataDir = tmpDataDir("mm");
     const cfg = makeConfig({ dataDir });

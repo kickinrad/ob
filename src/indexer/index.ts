@@ -153,18 +153,25 @@ export async function startIndexer(cfg: Config, deps: IndexerDeps): Promise<Inde
   // proving the embedder works first, we only commit to the destructive
   // rebuild once the rest of startup is plausibly going to succeed.
   const embedder = deps.embedder ?? buildEmbedder(cfg);
-  const dim = await warmEmbedder(embedder);
+  let dim: number;
+  try {
+    dim = await warmEmbedder(embedder);
+    // A failed reconciliation must not leave the warmed child running.
+    await reconcilePipelineVersion({
+      dataDir: cfg.dataDir,
+      slugs: cfg.vaults.map((v) => v.slug),
+      logger: log,
+    });
+  } catch (error) {
+    await embedder.stop?.();
+    throw error;
+  }
   // Reconcile the pipeline-version sidecar BEFORE opening any per-vault
   // store: a sidecar bump from N → N+1 must drop every existing table so
   // the initial scanner re-chunks and re-embeds against the new corpus
   // shape. A sidecar that's *newer* than the binary errors out before we
   // touch any rows — the operator is running an older binary against a
   // newer data dir, and proceeding would corrupt their index.
-  await reconcilePipelineVersion({
-    dataDir: cfg.dataDir,
-    slugs: cfg.vaults.map((v) => v.slug),
-    logger: log,
-  });
   const stopTimeoutMs = deps.stopTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS;
 
   const openStore =
@@ -196,6 +203,7 @@ export async function startIndexer(cfg: Config, deps: IndexerDeps): Promise<Inde
         }
       }),
     );
+    await embedder.stop?.();
   };
 
   try {
@@ -393,6 +401,7 @@ export async function startIndexer(cfg: Config, deps: IndexerDeps): Promise<Inde
           ),
           stopTimeoutMs,
         );
+        if (embedder.stop !== undefined) await withTimeout(embedder.stop(), stopTimeoutMs);
       })();
       return stopPromise;
     },

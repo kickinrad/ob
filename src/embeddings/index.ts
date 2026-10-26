@@ -1,7 +1,7 @@
 /**
  * Embedding-provider abstraction.
  *
- * Both the in-process Transformers.js provider and the OpenAI HTTP provider
+ * Both the isolated Transformers.js provider and the OpenAI HTTP provider
  * implement the same `Embedder` interface so the indexer can stay
  * provider-agnostic. The indexer never new's a provider directly; it calls
  * `buildEmbedder(cfg, deps?)` which selects from `cfg.embeddingProvider`.
@@ -12,6 +12,7 @@
  */
 
 import type { Config } from "../config/index.ts";
+import { type IsolatedTransformersDeps, buildIsolatedTransformersEmbedder } from "./isolated.ts";
 import { type OpenAIDeps, buildOpenAIEmbedder } from "./openai.ts";
 import { type TransformersDeps, buildTransformersEmbedder } from "./transformers.ts";
 
@@ -19,6 +20,8 @@ export interface Embedder {
   /** Vector dimension produced by `embed()`. Constant for the lifetime of the instance. */
   readonly dim: number;
   embed(texts: string[]): Promise<Float32Array[]>;
+  /** Release a provider's subprocess or connection during indexer shutdown. */
+  stop?(): Promise<void>;
 }
 
 /**
@@ -39,6 +42,7 @@ export class EmbedderError extends Error {
 
 export interface BuildEmbedderDeps {
   readonly transformers?: TransformersDeps;
+  readonly isolated?: IsolatedTransformersDeps;
   readonly openai?: OpenAIDeps;
 }
 
@@ -62,10 +66,11 @@ export function buildEmbedder(cfg: Config, deps: BuildEmbedderDeps = {}): Embedd
     if (cfg.openaiBaseUrl !== undefined) openaiInput.baseUrl = cfg.openaiBaseUrl;
     return buildOpenAIEmbedder(openaiInput, deps.openai);
   }
-  return buildTransformersEmbedder(
-    { model: cfg.embeddingModel, dataDir: cfg.dataDir },
-    deps.transformers,
-  );
+  const input = { model: cfg.embeddingModel, dataDir: cfg.dataDir };
+  // Unit tests inject a pipeline; production isolates ONNX in a recyclable
+  // child so native allocations cannot accumulate in the server process.
+  if (deps.transformers !== undefined) return buildTransformersEmbedder(input, deps.transformers);
+  return buildIsolatedTransformersEmbedder(input, deps.isolated);
 }
 
 export type { OpenAIDeps } from "./openai.ts";
