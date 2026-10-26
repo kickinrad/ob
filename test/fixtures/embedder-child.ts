@@ -4,6 +4,10 @@ process.on("SIGTERM", () => {
 
 process.on("message", (message: unknown) => {
   const request = message as { id: number; texts: string[] };
+  if (request.texts.length > 16) {
+    process.send?.({ id: request.id, error: `batch too large: ${request.texts.length}` });
+    return;
+  }
   if (request.texts.includes("crash")) process.exit(7);
   if (request.texts.includes("hang")) return;
   if (request.texts.includes("incomplete")) {

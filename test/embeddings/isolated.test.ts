@@ -5,6 +5,22 @@ import { buildIsolatedTransformersEmbedder } from "../../src/embeddings/isolated
 const fixture = fileURLToPath(new URL("../fixtures/embedder-child.ts", import.meta.url));
 
 describe("isolated Transformers embedder", () => {
+  test("splits a large edit into bounded batches and preserves vector order", async () => {
+    const embedder = buildIsolatedTransformersEmbedder(
+      { model: "unused", dataDir: "/tmp/unused" },
+      { childPath: fixture, batchesPerChild: 2 },
+    );
+    try {
+      const texts = Array.from({ length: 33 }, (_, i) => "x".repeat(i + 1));
+      const vectors = await embedder.embed(texts);
+      expect(vectors.map((vector) => vector[1])).toEqual(texts.map((text) => text.length));
+      expect(vectors[0]?.[0]).toBe(vectors[31]?.[0] ?? -1);
+      expect(vectors[32]?.[0]).not.toBe(vectors[0]?.[0] ?? -1);
+    } finally {
+      await embedder.stop();
+    }
+  });
+
   test("recycles the child after two batches while keeping results and dimensions", async () => {
     const embedder = buildIsolatedTransformersEmbedder(
       { model: "unused", dataDir: "/tmp/unused" },

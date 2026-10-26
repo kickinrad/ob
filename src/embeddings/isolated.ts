@@ -3,7 +3,10 @@ import { fileURLToPath } from "node:url";
 import { EmbedderError } from "./index.ts";
 import type { TransformersEmbedderInput } from "./transformers.ts";
 
-const DEFAULT_BATCHES_PER_CHILD = 32;
+// A large note can have hundreds of chunks; ONNX allocates for the whole
+// inference input at once, so recycling alone cannot cap its peak RSS.
+const MAX_TEXTS_PER_BATCH = 16;
+const DEFAULT_BATCHES_PER_CHILD = 8;
 const DEFAULT_CHILD_PATH = fileURLToPath(new URL("./transformers-worker.ts", import.meta.url));
 
 interface ChildReply {
@@ -100,7 +103,13 @@ export function buildIsolatedTransformersEmbedder(
 
   function embed(texts: string[]): Promise<Float32Array[]> {
     if (texts.length === 0) return Promise.resolve([]);
-    const result = queue.then(() => oneBatch(texts));
+    const result = queue.then(async () => {
+      const vectors: Float32Array[] = [];
+      for (let offset = 0; offset < texts.length; offset += MAX_TEXTS_PER_BATCH) {
+        vectors.push(...(await oneBatch(texts.slice(offset, offset + MAX_TEXTS_PER_BATCH))));
+      }
+      return vectors;
+    });
     queue = result.then(
       () => undefined,
       () => undefined,
