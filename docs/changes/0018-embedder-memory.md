@@ -2,7 +2,7 @@
 
 ## Summary
 
-Keep the default Transformers.js embedder's memory bounded while a vault is being edited. ONNX Runtime's CPU arena is turned off, every output tensor is disposed after its vectors are copied out, and local inference moves into a short-lived Bun child process that the indexer recycles after at most 8 batches of at most 16 texts each. `@huggingface/transformers` is updated to the latest release (4.3.1 in `bun.lock`). Implements the revised topology rule in [Architecture › Server-Process Topology](../specs/architecture/index.md#server-process-topology) and the new memory constraint in [Vault Indexer › Constraints](../specs/vault-indexer/index.md#constraints).
+Keep the default Transformers.js embedder's memory bounded while a vault is being edited. ONNX Runtime's CPU arena is turned off, every output tensor is disposed after its vectors are copied out, and local inference moves into a short-lived Bun child process that the indexer recycles after at most 8 batches of at most 16 texts each. `@huggingface/transformers` is updated from 4.2.0 to 4.3.1. Implements the revised topology rule in [Architecture › Server-Process Topology](../specs/architecture/index.md#server-process-topology) and the new memory constraint in [Vault Indexer › Constraints](../specs/vault-indexer/index.md#constraints).
 
 **Spec:** [Vault Indexer](../specs/vault-indexer/)
 **Status:** complete
@@ -51,7 +51,7 @@ This change MUST satisfy the project's standing testing rules (see [Architecture
 - [x] `src/embeddings/isolated.ts` and `src/embeddings/transformers-worker.ts`: batched, recyclable embedding child
 - [x] `src/embeddings/index.ts`: optional `Embedder.stop()`; isolated embedder by default
 - [x] `src/indexer/index.ts`: stop the embedder on shutdown and on failed startup
-- [x] `@huggingface/transformers` updated to the latest release
+- [x] `@huggingface/transformers` updated from 4.2.0 to 4.3.1
 - [x] Tests: worker batching, recycling, exit and stop paths; tensor disposal; indexer cleanup
 - [x] Specs: Architecture topology and Vault Indexer constraint, each with a Changelog row; `README.md`
 - [x] This change document, `docs/index.yml`, and `docs/index.md`

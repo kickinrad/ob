@@ -150,7 +150,7 @@ changes:
   - id: "0018"
     name: embedder-memory
     path: changes/0018-embedder-memory.md
-    description: Default Transformers.js embedder runs with the ONNX CPU arena off, disposes output tensors, and moves inference into a recyclable Bun child that handles at most 8 batches of at most 16 texts; Transformers.js updated to the latest release.
+    description: Default Transformers.js embedder runs with the ONNX CPU arena off, disposes output tensors, and moves inference into a recyclable Bun child that handles at most 8 batches of at most 16 texts; Transformers.js updated from 4.2.0 to 4.3.1.
     spec: vault-indexer
     status: complete
     depends_on: ["0003"]
