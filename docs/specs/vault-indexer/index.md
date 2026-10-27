@@ -260,3 +260,4 @@ fs unlink ───────────────────────�
 | 2026-05-03 | Initial spec created | — |
 | 2026-05-03 | Chunker: flat-list-section heuristic + `embed_text` composition. Schema adds `embed_text` column. Pipeline-version sidecar drives full re-embed on chunker change. | [Change 0007](../../changes/0007-indexer-relevance.md) |
 | 2026-05-03 | New "Search relevance" section: hybrid retrieval (vector + FTS via RRF), MMR diversification, score threshold. Indexer interface gains `mode`, `threshold`, `mmrLambda`, `maxPerPath`. | [Change 0008](../../changes/0008-search-relevance.md) |
+| 2026-10-27 | Default embedder runs in a short-lived local Bun worker. New constraint: each inference batch holds at most 16 texts and the worker is recycled after at most 8 batches. Layout gains `isolated.ts` and `transformers-worker.ts`. | [Change 0018](../../changes/0018-embedder-memory.md) |
