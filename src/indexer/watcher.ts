@@ -16,9 +16,8 @@
  * the watcher with no observable signal.
  */
 
-import { readdirSync, statSync, watch as watchNative } from "node:fs";
+import { type Dirent, type Stats, readdirSync, statSync, watch as watchNative } from "node:fs";
 import { join, relative, sep } from "node:path";
-import type { FSWatcher, watch } from "chokidar";
 import type { Logger } from "../log.ts";
 import { isMarkdownFile, shouldIgnorePath } from "./scanner.ts";
 
@@ -32,8 +31,10 @@ export interface WatcherEvent {
 
 export interface WatcherOptions {
   readonly debounceMs?: number;
-  /** Override the chokidar watch factory — tests inject a fake. */
-  readonly watchImpl?: typeof watch;
+  /** Override native filesystem operations at the OS boundary in tests. */
+  readonly watchImpl?: typeof watchNative;
+  readonly statImpl?: (path: string) => Stats;
+  readonly readDirImpl?: (dir: string) => Dirent[];
   /** Override `setTimeout`/`clearTimeout` — tests inject a fake clock. */
   readonly setTimer?: (cb: () => void, ms: number) => unknown;
   readonly clearTimer?: (handle: unknown) => void;
@@ -74,24 +75,10 @@ export function startWatcher(
   const debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS;
   const setTimer = opts.setTimer ?? ((cb, ms) => setTimeout(cb, ms));
   const clearTimer = opts.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
-  const watchImpl = opts.watchImpl;
-
-  // Bun's fs.watch on individual files retains descriptors after Sync's
-  // delete-and-rename replacement. Native watches on directories keep the
-  // descriptor count tied to folders rather than notes.
-  const fsw: FSWatcher | undefined = watchImpl?.(root, {
-    ignoreInitial: true,
-    persistent: true,
-    // chokidar's `ignored` accepts a function — return true to skip. We
-    // reuse the scanner's predicate so watcher and scanner stay in lock-
-    // step on what counts as "indexable".
-    ignored: (absPath: string): boolean => {
-      const rel = relative(root, absPath);
-      // chokidar will pass us the root itself as ".".
-      if (rel === "" || rel === ".") return false;
-      return shouldIgnorePath(rel);
-    },
-  });
+  const watchImpl = opts.watchImpl ?? watchNative;
+  const statImpl = opts.statImpl ?? statSync;
+  const readDirImpl =
+    opts.readDirImpl ?? ((dir: string) => readdirSync(dir, { withFileTypes: true }));
 
   interface Pending {
     kind: WatcherEventKind;
@@ -127,28 +114,28 @@ export function startWatcher(
 
   const nativeWatches = new Map<string, ReturnType<typeof watchNative>>();
   const knownFiles = new Set<string>();
-  if (fsw !== undefined) {
-    fsw.on("add", (p) => queue("upsert", p));
-    fsw.on("change", (p) => queue("upsert", p));
-    fsw.on("unlink", (p) => queue("remove", p));
-    fsw.on("error", onError);
-  } else {
-    const attachDir = (dir: string, emitExisting: boolean): void => {
-      if (nativeWatches.has(dir)) return;
-      const native = watchNative(dir, (_event, filename) => {
+  const attachDir = (dir: string, emitExisting: boolean): void => {
+    if (nativeWatches.has(dir)) return;
+    let native: ReturnType<typeof watchNative>;
+    try {
+      native = watchImpl(dir, (_event, filename) => {
         if (filename === null) return;
         const absPath = join(dir, filename.toString());
         const relPath = relative(root, absPath);
         if (shouldIgnorePath(relPath)) return;
         try {
-          const stat = statSync(absPath);
+          const stat = statImpl(absPath);
           if (stat.isDirectory()) {
             attachDir(absPath, true);
           } else if (stat.isFile() && isMarkdownFile(relPath)) {
             knownFiles.add(absPath);
             queue("upsert", absPath);
           }
-        } catch {
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            onError(error);
+            return;
+          }
           for (const path of knownFiles) {
             if (path === absPath || path.startsWith(`${absPath}${sep}`)) {
               knownFiles.delete(path);
@@ -163,38 +150,37 @@ export function startWatcher(
           }
         }
       });
-      native.on("error", onError);
-      nativeWatches.set(dir, native);
-      let entries: ReturnType<typeof readdirSync>;
-      try {
-        entries = readdirSync(dir, { withFileTypes: true });
-      } catch {
-        native.close();
-        nativeWatches.delete(dir);
-        return;
+    } catch (error) {
+      onError(error);
+      return;
+    }
+    native.on("error", onError);
+    nativeWatches.set(dir, native);
+    let entries: Dirent[];
+    try {
+      entries = readDirImpl(dir);
+    } catch (error) {
+      onError(error);
+      native.close();
+      nativeWatches.delete(dir);
+      return;
+    }
+    for (const entry of entries) {
+      const path = join(dir, entry.name);
+      const rel = relative(root, path);
+      if (shouldIgnorePath(rel)) continue;
+      if (entry.isDirectory()) attachDir(path, emitExisting);
+      else if (entry.isFile() && isMarkdownFile(rel)) {
+        knownFiles.add(path);
+        if (emitExisting) queue("upsert", path);
       }
-      for (const entry of entries) {
-        const path = join(dir, entry.name);
-        const rel = relative(root, path);
-        if (shouldIgnorePath(rel)) continue;
-        if (entry.isDirectory()) attachDir(path, emitExisting);
-        else if (entry.isFile() && isMarkdownFile(rel)) {
-          knownFiles.add(path);
-          if (emitExisting) queue("upsert", path);
-        }
-      }
-    };
-    attachDir(root, false);
-  }
+    }
+  };
+  // Bun's per-file fs.watch retains deleted-file descriptors. Watch only
+  // directories, keeping handles proportional to folders instead of notes.
+  attachDir(root, false);
 
-  // The injected chokidar watcher emits `ready` once. Capture it before any
-  // caller can attach, while native directory watches are ready immediately.
-  let resolveReady!: () => void;
-  const readyPromise = new Promise<void>((r) => {
-    resolveReady = r;
-  });
-  if (fsw === undefined) resolveReady();
-  else fsw.once("ready", () => resolveReady());
+  const readyPromise = Promise.resolve();
 
   return {
     ready(): Promise<void> {
@@ -218,11 +204,8 @@ export function startWatcher(
         });
       }
       pending.clear();
-      if (fsw !== undefined) await fsw.close();
-      else {
-        for (const native of nativeWatches.values()) native.close();
-        nativeWatches.clear();
-      }
+      for (const native of nativeWatches.values()) native.close();
+      nativeWatches.clear();
     },
   };
 }

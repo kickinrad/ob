@@ -734,6 +734,36 @@ describe("a stalled vault on the health endpoints", () => {
 });
 
 describe("persistent sync failure on /healthz, end to end", () => {
+  test("brief completed syncs between failures still reach the health threshold", async () => {
+    const h = harness({ children: 5 });
+    const supervisor: Supervisor = {
+      list: () => [h.child.snapshot()],
+      get: (slug) => (slug === "v" ? h.child.snapshot() : null),
+      stop: async () => undefined,
+    };
+    const app = buildHttpApp({ supervisor });
+
+    for (let failure = 1; failure <= 3; failure++) {
+      await h.awaitArmed();
+      h.fs.append(LOG_PATH, "Fully synced\n", h.driver.now() + POLL_MS);
+      h.driver.advance(POLL_MS);
+      await h.poll();
+      await until(() => h.driver.count(POLL_MS) > 0, "sync completion observed");
+      await h.stallOnce();
+      await until(() => h.child.snapshot().restarts === failure, `failure ${failure} counted`);
+      const delays = [BACKOFF_MS, BACKOFF_MS * 2, BACKOFF_MS * 4];
+      await until(() => delays.some((delay) => h.driver.count(delay) > 0), "backoff parked");
+      for (const delay of delays) h.driver.release(delay);
+      await until(() => h.child.snapshot().state === "running", "replacement running");
+    }
+
+    expect(h.child.snapshot().consecutiveFailures).toBe(3);
+    expect((await app.request("/healthz")).status).toBe(503);
+    h.child.requestStop();
+    h.crashCurrent(0);
+    await h.loop;
+  });
+
   test("three consecutive stall kills fail liveness; a recovered attempt restores it", async () => {
     const h = harness({ children: 5 });
     const supervisor: Supervisor = {
@@ -774,12 +804,9 @@ describe("persistent sync failure on /healthz, end to end", () => {
       consecutiveFailures: 3,
     });
 
-    // A completed sync clears startup failures as soon as its log is read.
-    await h.awaitArmed();
-    h.fs.append(LOG_PATH, "Fully synced\n", h.driver.now() + POLL_MS);
-    h.driver.advance(POLL_MS);
-    await h.poll();
-    await until(() => h.logged.some((entry) => entry.msg === "ob output"), "sync log read");
+    // Five minutes of observed progress clears stale failures while the
+    // replacement remains in flight.
+    await writeFor(h, 5 * 60_000);
     const back = await app.request("/healthz");
     expect(back.status).toBe(200);
     expect(await back.json()).toEqual({ ok: true });

@@ -385,12 +385,6 @@ export class VaultChild {
         syncDir: wd.syncDir,
         config: wd.config,
         memory: this.watchdogMemory,
-        onSyncComplete: () => {
-          if (this.currentHandle !== handle || this.status.state !== "running") return;
-          this.status.consecutiveFailures = 0;
-          this.crashTimes.length = 0;
-          this.status.lastError = null;
-        },
         ...(wd.maxTailBytes !== undefined ? { maxTailBytes: wd.maxTailBytes } : {}),
       },
       (reason) => this.onStallVerdict(handle, reason),

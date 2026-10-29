@@ -144,8 +144,6 @@ export interface WatchdogDeps {
   /** Carried over from the previous child, so evidence survives a restart. */
   readonly memory?: WatchdogMemory;
   readonly maxTailBytes?: number;
-  /** Called only for a newly tailed completed-sync line. */
-  readonly onSyncComplete?: () => void;
 }
 
 export interface WatchdogHandle {
@@ -445,7 +443,6 @@ export function startWatchdog(
 
   function emit(line: string): void {
     if (line === "") return; // empty lines are never forwarded
-    if (line.includes("Fully synced")) deps.onSyncComplete?.();
     deps.logger.info("ob output", {
       vault: vault.slug,
       source: "ob",

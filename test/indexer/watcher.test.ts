@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  type watch,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type WatcherEvent, startWatcher } from "../../src/indexer/watcher.ts";
@@ -22,6 +32,26 @@ function collect(): { events: WatcherEvent[]; on: (e: WatcherEvent) => void } {
     events,
     on: (e) => {
       events.push(e);
+    },
+  };
+}
+
+function fakeNativeWatch() {
+  const listeners = new Map<string, (event: string, filename: string | null) => void>();
+  const handles = new Map<string, EventEmitter>();
+  const closed = new Set<string>();
+  const watchImpl = ((dir: string, listener: (event: string, filename: string | null) => void) => {
+    listeners.set(dir, listener);
+    const handle = Object.assign(new EventEmitter(), { close: () => closed.add(dir) });
+    handles.set(dir, handle);
+    return handle;
+  }) as unknown as typeof watch;
+  return {
+    watchImpl,
+    closed,
+    emitFile: (dir: string, filename: string): void => listeners.get(dir)?.("change", filename),
+    emitError: (dir: string, error: unknown): void => {
+      handles.get(dir)?.emit("error", error);
     },
   };
 }
@@ -167,7 +197,7 @@ describe("startWatcher (real fs)", () => {
     expect(sink.events).toEqual([]);
   });
 
-  test("chokidar `error` events surface via lastError() + logger + onError (LDn0)", async () => {
+  test("native watch errors reach lastError, logger, and callback", async () => {
     const root = tmpRoot();
     const sink = collect();
     let captured: Error | null = null;
@@ -181,30 +211,9 @@ describe("startWatcher (real fs)", () => {
       },
       error: () => undefined,
     };
-    let injectedFsw: { emit: (e: string, a: unknown) => void } | undefined;
-    // Inject a fake watch impl so we can synthesise an `error` event
-    // without needing a real fs failure mode.
-    const fakeWatch = (() => {
-      const handlers = new Map<string, ((arg: unknown) => void)[]>();
-      const on = (evt: string, cb: (arg: unknown) => void): unknown => {
-        const list = handlers.get(evt) ?? [];
-        list.push(cb);
-        handlers.set(evt, list);
-        return injectedFsw;
-      };
-      const fsw = {
-        on,
-        once: on,
-        close: async (): Promise<void> => undefined,
-        emit: (evt: string, arg: unknown): void => {
-          for (const h of handlers.get(evt) ?? []) h(arg);
-        },
-      };
-      injectedFsw = fsw;
-      return fsw;
-    }) as unknown as typeof import("chokidar").watch;
+    const fake = fakeNativeWatch();
     const w = startWatcher(root, sink.on, {
-      watchImpl: fakeWatch,
+      watchImpl: fake.watchImpl,
       logger,
       onError: (e) => {
         captured = e;
@@ -212,7 +221,7 @@ describe("startWatcher (real fs)", () => {
     });
     cleanup.push(async () => w.stop());
     const ENOSPC = new Error("ENOSPC: no space");
-    injectedFsw?.emit("error", ENOSPC);
+    fake.emitError(root, ENOSPC);
     expect(captured).not.toBeNull();
     expect((captured as unknown as Error).message).toBe("ENOSPC: no space");
     expect(w.lastError()?.message).toBe("ENOSPC: no space");
@@ -221,34 +230,78 @@ describe("startWatcher (real fs)", () => {
 
   test("non-Error error payload is wrapped in Error", async () => {
     const root = tmpRoot();
-    let injectedFsw: { emit: (e: string, a: unknown) => void } | undefined;
-    const fakeWatch = (() => {
-      const handlers = new Map<string, ((arg: unknown) => void)[]>();
-      const fsw = {
-        on: (evt: string, cb: (arg: unknown) => void): unknown => {
-          const list = handlers.get(evt) ?? [];
-          list.push(cb);
-          handlers.set(evt, list);
-          return injectedFsw;
-        },
-        once: (evt: string, cb: (arg: unknown) => void): unknown => {
-          const list = handlers.get(evt) ?? [];
-          list.push(cb);
-          handlers.set(evt, list);
-          return injectedFsw;
-        },
-        close: async (): Promise<void> => undefined,
-        emit: (evt: string, arg: unknown): void => {
-          for (const h of handlers.get(evt) ?? []) h(arg);
-        },
-      };
-      injectedFsw = fsw;
-      return fsw;
-    }) as unknown as typeof import("chokidar").watch;
-    const w = startWatcher(root, () => undefined, { watchImpl: fakeWatch });
+    const fake = fakeNativeWatch();
+    const w = startWatcher(root, () => undefined, { watchImpl: fake.watchImpl });
     cleanup.push(async () => w.stop());
-    injectedFsw?.emit("error", "string error");
+    fake.emitError(root, "string error");
     expect(w.lastError()?.message).toBe("string error");
+  });
+
+  test("stat errors other than ENOENT preserve a known note", async () => {
+    const root = tmpRoot();
+    const note = join(root, "note.md");
+    writeFileSync(note, "existing");
+    const sink = collect();
+    const errors: Error[] = [];
+    const fake = fakeNativeWatch();
+    const failure = Object.assign(new Error("permission denied"), { code: "EACCES" });
+    const w = startWatcher(root, sink.on, {
+      watchImpl: fake.watchImpl,
+      statImpl: (path) => {
+        if (path === note) throw failure;
+        return statSync(path);
+      },
+      onError: (error) => errors.push(error),
+    });
+    cleanup.push(async () => w.stop());
+    fake.emitFile(root, "note.md");
+    expect(errors).toEqual([failure]);
+    expect(w.lastError()).toBe(failure);
+    expect(sink.events).toEqual([]);
+  });
+
+  test("a failed native watch reports the directory error and keeps other watches", async () => {
+    const root = tmpRoot();
+    const sub = join(root, "sub");
+    mkdirSync(sub);
+    const errors: Error[] = [];
+    const sink = collect();
+    const fake = fakeNativeWatch();
+    const failure = Object.assign(new Error("watch limit"), { code: "ENOSPC" });
+    const watchImpl = ((
+      dir: string,
+      listener: (event: string, filename: string | null) => void,
+    ) => {
+      if (dir === sub) throw failure;
+      return fake.watchImpl(dir, listener);
+    }) as typeof watch;
+    const w = startWatcher(root, sink.on, { watchImpl, onError: (error) => errors.push(error) });
+    cleanup.push(async () => w.stop());
+    expect(errors).toEqual([failure]);
+    writeFileSync(join(root, "good.md"), "ok");
+    fake.emitFile(root, "good.md");
+    await waitUntil(() => sink.events.length > 0);
+    expect(sink.events[0]?.relPath).toBe("good.md");
+  });
+
+  test("a failed directory read reports the error and closes that watch", async () => {
+    const root = tmpRoot();
+    const sub = join(root, "sub");
+    mkdirSync(sub);
+    const errors: Error[] = [];
+    const fake = fakeNativeWatch();
+    const failure = Object.assign(new Error("directory vanished"), { code: "ENOENT" });
+    const w = startWatcher(root, () => undefined, {
+      watchImpl: fake.watchImpl,
+      readDirImpl: (dir) => {
+        if (dir === sub) throw failure;
+        return readdirSync(dir, { withFileTypes: true });
+      },
+      onError: (error) => errors.push(error),
+    });
+    cleanup.push(async () => w.stop());
+    expect(errors).toEqual([failure]);
+    expect(fake.closed.has(sub)).toBe(true);
   });
 
   test("lastError() returns null before any error fires", async () => {

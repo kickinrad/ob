@@ -1,15 +1,37 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readlinkSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readlinkSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startWatcher } from "../../src/indexer/watcher.ts";
+import { type WatcherEvent, startWatcher } from "../../src/indexer/watcher.ts";
 
 test("replacing and deleting synced notes does not accumulate file descriptors", async () => {
   if (process.platform !== "linux") return;
   const root = mkdtempSync(join(tmpdir(), "ob-watch-fd-"));
-  const watcher = startWatcher(root, () => {});
+  const events: WatcherEvent[] = [];
+  const errors: Error[] = [];
+  const watcher = startWatcher(root, (event) => events.push(event), {
+    debounceMs: 20,
+    onError: (error) => errors.push(error),
+  });
   try {
     await watcher.ready();
+    const newDir = join(root, "new");
+    mkdirSync(newDir);
+    writeFileSync(join(newDir, "nested.md"), "# Nested\n");
+    for (let i = 0; i < 40 && !events.some((event) => event.relPath === "new/nested.md"); i++) {
+      await Bun.sleep(50);
+    }
+    expect(
+      events.some((event) => event.kind === "upsert" && event.relPath === "new/nested.md"),
+    ).toBe(true);
     for (let i = 0; i < 80; i++) {
       const note = join(root, `note-${i % 12}.md`);
       const replacement = join(root, `incoming-${i}.md`);
@@ -18,7 +40,20 @@ test("replacing and deleting synced notes does not accumulate file descriptors",
       renameSync(replacement, note);
       await Bun.sleep(10);
     }
+    writeFileSync(join(root, "after-burst.md"), "# Still watched\n");
     for (let i = 0; i < 12; i++) rmSync(join(root, `note-${i}.md`), { force: true });
+    for (
+      let i = 0;
+      i < 40 &&
+      !events.some((event) => event.kind === "upsert" && event.relPath === "after-burst.md");
+      i++
+    ) {
+      await Bun.sleep(50);
+    }
+    expect(
+      events.some((event) => event.kind === "upsert" && event.relPath === "after-burst.md"),
+    ).toBe(true);
+    expect(errors).toEqual([]);
     const deletedHandles = (): string[] =>
       readdirSync("/proc/self/fd").filter((fd) => {
         try {
