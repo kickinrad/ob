@@ -11,9 +11,9 @@
 # Layer order (per change 0006 design): apt → npm globals → bun deps →
 # app source. Source edits invalidate only the cheap final layers.
 #
-# The toolchain versions (Node, Bun, obsidian-headless) are captured as build
-# ARGs below. Bumps are one-edit changes, and a historical toolchain
-# reproduces exactly via `docker build --build-arg ...`. The runtime stage's
+# The toolchain selections (Node, Bun, obsidian-headless) are build ARGs.
+# Bun follows current releases; a historical toolchain can still be selected
+# with `docker build --build-arg ...`. The runtime stage's
 # apt packages are deliberately NOT pinned — see the note above that
 # `RUN apt-get`. ARGs declared before the first FROM are "global" — each
 # stage that wants to read one must redeclare it.
@@ -22,9 +22,9 @@
 # `node = "22.X.Y"`). Latest 22-bookworm-slim patch at PR time.
 ARG NODE_VERSION=22.22.2
 
-# Bun runtime — MUST match `mise.toml`'s `bun = "X.Y.Z"` so dev/CI/Docker
-# share an identical toolchain.
-ARG BUN_VERSION=1.3.13
+# Bun tracks current releases, matching mise.toml and CI. Bun 1.3.13 kept
+# one descriptor per note in watched directories.
+ARG BUN_VERSION=latest
 
 # obsidian-headless is pre-1.0; lock the exact patch and bump deliberately,
 # per change 0006's "Open Questions".
