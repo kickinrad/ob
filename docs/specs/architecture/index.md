@@ -155,13 +155,13 @@ REST and MCP MUST be two interfaces to the same functionality, not two implement
 - The final stage MUST be `oven/bun:1` (or smaller `-distroless`-style base if compatible) containing: Bun runtime, Node 22 binary, the global `ob` binary, our app source, and `tini` as PID 1.
 - The image MUST `EXPOSE 3000` and define `HEALTHCHECK` against `GET /healthz`.
 - The image MUST NOT bake any secrets.
-- The runtime stage's apt packages (`tini`, `curl`, `ca-certificates`) MUST be installed unpinned. Debian removes superseded versions from the archive on every point release, so an exact `=<version>` pin turns into `E: Version '...' was not found` and breaks every build — including unrelated PRs — until someone hand-edits the string. apt-level reproducibility is deliberately traded for build resilience; image reproducibility instead rests on the pinned base image and the toolchain build ARGs (`NODE_VERSION`, `BUN_VERSION`, `OBSIDIAN_HEADLESS_VERSION`), which MUST stay pinned to an exact version.
+- The runtime stage's apt packages (`tini`, `curl`, `ca-certificates`) MUST be installed unpinned. Debian removes superseded versions from the archive on every point release, so an exact `=<version>` pin turns into `E: Version '...' was not found` and breaks every build — including unrelated PRs — until someone hand-edits the string. Bun tracks current releases in `mise.toml`, CI, and Docker because the earlier runtime retained a descriptor for every note under a directory watch. Historical builds can select a specific Bun version through the Docker build argument.
 - Hadolint's DL3008 ("pin versions in apt get install") MUST therefore be suppressed narrowly, via an inline `# hadolint ignore=DL3008` directive on the affected instruction. It MUST NOT be disabled repo-wide. The directive MUST be the bare form with its justification in the adjacent comment — hadolint 2.12 (the version CI installs) does not parse a same-line reason.
 
 ### Testing & Lint
 
 - Unit and integration tests MUST be written with `bun test` (no Jest, no Vitest).
-- Coverage MUST be measured by `bun test --coverage` and MUST report ≥ 100% line and branch coverage on `src/` for CI to pass. New code without tests is a defect.
+- Coverage MUST be measured by `bun test --coverage`. CI MUST reject any newly uncovered source line relative to the exact Bun 1.4 baseline in `test/check-coverage.ts`, and MUST require full function and reported branch coverage. New code without tests is a defect.
 - Network calls to Obsidian's servers and to OpenAI MUST be mocked in unit tests. LanceDB MUST be exercised with a real store rooted in a `Bun.tmpdirSync()` directory — it is embedded, so isolation is cheap.
 - The `ob` binary MUST be exercised in at least one integration test per top-level change (a smoke test that runs `ob --help` and asserts exit 0). Tests MUST NOT call `ob login`, `ob sync-setup`, or `ob sync` against real Obsidian servers.
 - Biome MUST be the only linter and formatter. `biome.json` MUST extend `recommended`, enable `noExplicitAny`, and ignore: `node_modules/`, `dist/`, `data/`, `coverage/`, `*.md`, `bun.lockb`, lockfiles, `site/`, and any path under `vault/`.

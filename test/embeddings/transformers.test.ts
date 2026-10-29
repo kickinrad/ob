@@ -29,12 +29,14 @@ describe("buildTransformersEmbedder (unit)", () => {
   const originalHfHome = process.env.HF_HOME;
 
   beforeEach(() => {
-    process.env.TRANSFORMERS_CACHE = undefined;
-    process.env.HF_HOME = undefined;
+    Reflect.deleteProperty(process.env, "TRANSFORMERS_CACHE");
+    Reflect.deleteProperty(process.env, "HF_HOME");
   });
   afterEach(() => {
-    process.env.TRANSFORMERS_CACHE = originalCache;
-    process.env.HF_HOME = originalHfHome;
+    if (originalCache === undefined) Reflect.deleteProperty(process.env, "TRANSFORMERS_CACHE");
+    else process.env.TRANSFORMERS_CACHE = originalCache;
+    if (originalHfHome === undefined) Reflect.deleteProperty(process.env, "HF_HOME");
+    else process.env.HF_HOME = originalHfHome;
   });
 
   test("lazy-loads pipeline on first embed call", async () => {

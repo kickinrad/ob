@@ -12,6 +12,30 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type WatcherEvent, startWatcher } from "../../src/indexer/watcher.ts";
 
+test("watching a populated vault does not retain note file descriptors", async () => {
+  if (process.platform !== "linux") return;
+  const root = mkdtempSync(join(tmpdir(), "ob-watch-existing-"));
+  for (let i = 0; i < 120; i++) writeFileSync(join(root, `note-${i}.md`), `# Note ${i}\n`);
+  const noteHandles = (): string[] =>
+    readdirSync("/proc/self/fd").flatMap((fd) => {
+      try {
+        const path = readlinkSync(`/proc/self/fd/${fd}`);
+        return path.startsWith(root) && path.endsWith(".md") ? [path] : [];
+      } catch {
+        return [];
+      }
+    });
+  const watcher = startWatcher(root, () => undefined);
+  try {
+    await watcher.ready();
+    await Bun.sleep(500);
+    expect(noteHandles()).toEqual([]);
+  } finally {
+    await watcher.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("replacing and deleting synced notes does not accumulate file descriptors", async () => {
   if (process.platform !== "linux") return;
   const root = mkdtempSync(join(tmpdir(), "ob-watch-fd-"));

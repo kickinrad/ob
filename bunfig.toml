@@ -1,9 +1,9 @@
 [test]
-# CI gate: 100% on every metric Bun knows how to report.
+# CI gate: no new uncovered source lines and full function coverage.
 #
 # Bun's coverage gate enforces the aggregate; `test/check-coverage.ts` (run
 # from the `test:cov` npm script) parses `coverage/lcov.info` and re-asserts
-# per-file at 100% line + function + branch.
+# per-file against the Bun 1.4 line baseline, plus full function + branch.
 #
 # Branch coverage: Bun ≤ 1.3 does not emit `BRDA`/`BRF`/`BRH` records, so
 # `statement = 1.0` here is a forward-looking guard — when Bun adds branch

@@ -304,6 +304,22 @@ describe("startWatcher (real fs)", () => {
     expect(fake.closed.has(sub)).toBe(true);
   });
 
+  test("removing a directory closes its native watch", async () => {
+    const root = tmpRoot();
+    const sub = join(root, "sub");
+    mkdirSync(sub);
+    writeFileSync(join(sub, "note.md"), "# Note\n");
+    const fake = fakeNativeWatch();
+    const sink = collect();
+    const w = startWatcher(root, sink.on, { watchImpl: fake.watchImpl, debounceMs: 10 });
+    cleanup.push(async () => w.stop());
+    rmSync(sub, { recursive: true });
+    fake.emitFile(root, "sub");
+    expect(fake.closed.has(sub)).toBe(true);
+    await waitUntil(() => sink.events.length > 0);
+    expect(sink.events).toMatchObject([{ kind: "remove", relPath: "sub/note.md" }]);
+  });
+
   test("lastError() returns null before any error fires", async () => {
     const root = tmpRoot();
     const w = startWatcher(root, () => undefined, { debounceMs: 50 });
