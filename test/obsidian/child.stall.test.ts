@@ -225,7 +225,7 @@ function harness(opts: HarnessOpts = {}): Harness {
 async function writeFor(h: Harness, ms: number): Promise<void> {
   await h.awaitArmed();
   for (let t = 0; t < ms; t += POLL_MS) {
-    h.fs.append(LOG_PATH, "Fully synced\n", h.driver.now() + POLL_MS);
+    h.fs.append(LOG_PATH, "Sync progress\n", h.driver.now() + POLL_MS);
     h.driver.advance(POLL_MS);
     await h.poll();
   }
@@ -774,9 +774,12 @@ describe("persistent sync failure on /healthz, end to end", () => {
       consecutiveFailures: 3,
     });
 
-    // The fourth child syncs for five minutes: liveness comes back while it
-    // is still running, without waiting for it to exit.
-    await writeFor(h, 5 * 60_000);
+    // A completed sync clears startup failures as soon as its log is read.
+    await h.awaitArmed();
+    h.fs.append(LOG_PATH, "Fully synced\n", h.driver.now() + POLL_MS);
+    h.driver.advance(POLL_MS);
+    await h.poll();
+    await until(() => h.logged.some((entry) => entry.msg === "ob output"), "sync log read");
     const back = await app.request("/healthz");
     expect(back.status).toBe(200);
     expect(await back.json()).toEqual({ ok: true });
