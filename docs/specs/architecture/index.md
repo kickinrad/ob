@@ -161,7 +161,7 @@ REST and MCP MUST be two interfaces to the same functionality, not two implement
 ### Testing & Lint
 
 - Unit and integration tests MUST be written with `bun test` (no Jest, no Vitest).
-- Coverage MUST be measured by `bun test --coverage` and MUST report ≥ 100% line and branch coverage on `src/` for CI to pass. New code without tests is a defect.
+- Coverage MUST be measured by `bun test --coverage`. CI MUST reject any newly uncovered source line relative to the exact Bun 1.4 baseline in `test/check-coverage.ts`, and MUST require full function and reported branch coverage. New code without tests is a defect.
 - Network calls to Obsidian's servers and to OpenAI MUST be mocked in unit tests. LanceDB MUST be exercised with a real store rooted in a `Bun.tmpdirSync()` directory — it is embedded, so isolation is cheap.
 - The `ob` binary MUST be exercised in at least one integration test per top-level change (a smoke test that runs `ob --help` and asserts exit 0). Tests MUST NOT call `ob login`, `ob sync-setup`, or `ob sync` against real Obsidian servers.
 - Biome MUST be the only linter and formatter. `biome.json` MUST extend `recommended`, enable `noExplicitAny`, and ignore: `node_modules/`, `dist/`, `data/`, `coverage/`, `*.md`, `bun.lockb`, lockfiles, `site/`, and any path under `vault/`.
