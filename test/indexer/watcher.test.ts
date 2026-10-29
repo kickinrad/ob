@@ -107,7 +107,7 @@ describe("startWatcher (real fs)", () => {
     expect(sink.events[0]?.kind).toBe("remove");
   });
 
-  test("emits ready promise that resolves once chokidar settles", async () => {
+  test("emits one shared ready promise", async () => {
     const root = tmpRoot();
     const w = startWatcher(root, () => undefined, { debounceMs: 50 });
     cleanup.push(async () => w.stop());
@@ -216,7 +216,7 @@ describe("startWatcher (real fs)", () => {
     expect(captured).not.toBeNull();
     expect((captured as unknown as Error).message).toBe("ENOSPC: no space");
     expect(w.lastError()?.message).toBe("ENOSPC: no space");
-    expect(logEntries).toContain("indexer: chokidar error");
+    expect(logEntries).toContain("indexer: watcher error");
   });
 
   test("non-Error error payload is wrapped in Error", async () => {
