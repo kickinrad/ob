@@ -103,8 +103,7 @@ test("tools/list over HTTP returns every registered tool", async () => {
   for (const t of body.result.tools) {
     expect((t.inputSchema as { type: string }).type).toBe("object");
   }
-  // Exactly the read tools advertise `readOnlyHint`, so clients (e.g. Claude
-  // Code in plan mode) can call them without a permission prompt.
+  // Exactly the read tools advertise `readOnlyHint` in tools/list.
   const readOnly = body.result.tools.filter((t) => t.annotations?.readOnlyHint === true);
   expect(readOnly.map((t) => t.name).sort()).toEqual([
     "list_files",
@@ -114,6 +113,9 @@ test("tools/list over HTTP returns every registered tool", async () => {
     "search",
     "vault_status",
   ]);
+  for (const t of body.result.tools.filter((t) => !readOnly.includes(t))) {
+    expect(t.annotations?.readOnlyHint).not.toBe(true);
+  }
 });
 
 test("tools/call with an unknown name surfaces the not_found isError envelope", async () => {
