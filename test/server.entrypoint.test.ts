@@ -15,16 +15,19 @@ const SERVER_ENTRY = resolve(import.meta.dir, "..", "src", "server.ts");
 
 function tmpHomeEnv(): Record<string, string> {
   const dir = mkdtempSync(join(tmpdir(), "ob-entry-"));
-  const bin = join(dir, "bin");
-  mkdirSync(bin);
-  const ob = join(bin, "ob");
-  writeFileSync(ob, '#!/bin/sh\nif [ "$1" = "sync" ]; then exec sleep 30; fi\nexit 0\n');
-  chmodSync(ob, 0o700);
+  const binDir = join(dir, "bin");
+  mkdirSync(binDir);
+  const ob = join(binDir, "ob");
+  writeFileSync(
+    ob,
+    '#!/bin/sh\ncase "$1" in\n  sync-status) exit 0 ;;\n  sync) exec /bin/sleep 1000 ;;\n  *) exit 0 ;;\nesac\n',
+  );
+  chmodSync(ob, 0o755);
   return {
+    PATH: `${binDir}:${process.env.PATH ?? ""}`,
     XDG_CONFIG_HOME: dir,
     HOME: dir,
     DATA_DIR: join(dir, "data"),
-    PATH: `${bin}:${process.env.PATH ?? ""}`,
   };
 }
 

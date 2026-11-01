@@ -154,3 +154,10 @@ changes:
     spec: vault-indexer
     status: complete
     depends_on: ["0003"]
+  - id: "0018"
+    name: mcp-read-only-annotations
+    path: changes/0018-mcp-read-only-annotations.md
+    description: The six read-only MCP tools (list_vaults, vault_status, list_files, read_file, list_folders, search) advertise annotations.readOnlyHint in tools/list so clients such as Claude Code can call them in plan mode.
+    spec: mcp-server
+    status: complete
+    depends_on: ["0005"]

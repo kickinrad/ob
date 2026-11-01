@@ -78,7 +78,9 @@ test("tools/list over HTTP returns every registered tool", async () => {
   });
   expect(res.status).toBe(200);
   const body = (await res.json()) as {
-    result: { tools: { name: string; inputSchema: object }[] };
+    result: {
+      tools: { name: string; inputSchema: object; annotations?: { readOnlyHint?: boolean } }[];
+    };
   };
   const names = body.result.tools.map((t) => t.name).sort();
   expect(names).toEqual(
@@ -100,6 +102,19 @@ test("tools/list over HTTP returns every registered tool", async () => {
   // Every tool advertises `inputSchema` as a JSON Schema object with type=object.
   for (const t of body.result.tools) {
     expect((t.inputSchema as { type: string }).type).toBe("object");
+  }
+  // Exactly the read tools advertise `readOnlyHint` in tools/list.
+  const readOnly = body.result.tools.filter((t) => t.annotations?.readOnlyHint === true);
+  expect(readOnly.map((t) => t.name).sort()).toEqual([
+    "list_files",
+    "list_folders",
+    "list_vaults",
+    "read_file",
+    "search",
+    "vault_status",
+  ]);
+  for (const t of body.result.tools.filter((t) => !readOnly.includes(t))) {
+    expect(t.annotations?.readOnlyHint).not.toBe(true);
   }
 });
 
