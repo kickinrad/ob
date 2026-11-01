@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0](https://github.com/kickinrad/ob/compare/v1.4.0...v1.5.0) (2026-11-01)
+
+
+### Features
+
+* **mcp:** advertise read-only vault tools to clients ([#3](https://github.com/kickinrad/ob/issues/3)) ([9be39a4](https://github.com/kickinrad/ob/commit/9be39a4ccf74785a7429c91b63b8a55a8d43a67d))
+* **sync:** retry sync forever by default and fail /healthz while sync stays down ([#28](https://github.com/kickinrad/ob/issues/28)) ([4066035](https://github.com/kickinrad/ob/commit/40660358cb39385aa1b4c60031157eb184b94753))
+
 ## [1.4.0](https://github.com/fx/ob/compare/v1.3.0...v1.4.0) (2026-09-15)
 
 
